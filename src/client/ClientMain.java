@@ -27,43 +27,83 @@ public class ClientMain {
     }
 
     public void build() {
-        frame = new JFrame("Quiz Race Client");
+        frame = new JFrame("🚗 Live Math Quiz Race");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(900,500);
+        frame.setSize(900, 550);
+        frame.setLayout(new BorderLayout());
 
-        JPanel top = new JPanel();
-        top.add(new JLabel("Server IP:"));
-        tfServerIP = new JTextField("127.0.0.1",10);
+        // ===== TOP PANEL (CONNECT) =====
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
+        top.setBackground(new Color(30, 30, 30));
+
+        JLabel lblServer = new JLabel("Server IP:");
+        lblServer.setForeground(Color.WHITE);
+        top.add(lblServer);
+
+        tfServerIP = new JTextField("127.0.0.1", 10);
         top.add(tfServerIP);
-        top.add(new JLabel("Port:"));
-        JTextField tfPort = new JTextField("5000",5);
+
+        top.add(new JLabel("Port:")).setForeground(Color.WHITE);
+        JTextField tfPort = new JTextField("5000", 5);
         top.add(tfPort);
 
-        top.add(new JLabel("Name:"));
-        tfName = new JTextField(10);
+        JLabel lblName = new JLabel("Name:");
+        lblName.setForeground(Color.WHITE);
+        top.add(lblName);
+
+        tfName = new JTextField(8);
         top.add(tfName);
 
-        cbOp = new JComboBox<>(new String[]{"+","-","*","/"});
-        top.add(new JLabel("Operation:"));
+        JLabel lblOp = new JLabel("Op:");
+        lblOp.setForeground(Color.WHITE);
+        top.add(lblOp);
+
+        cbOp = new JComboBox<>(new String[]{"+", "-", "*", "/"});
         top.add(cbOp);
 
         btnConnect = new JButton("Connect");
+        btnConnect.setBackground(new Color(0, 180, 100));
+        btnConnect.setForeground(Color.WHITE);
         top.add(btnConnect);
 
-        frame.getContentPane().add(top, BorderLayout.NORTH);
+        frame.add(top, BorderLayout.NORTH);
 
+        // ===== CENTER CONTAINER =====
+        JPanel centerContainer = new JPanel();
+        centerContainer.setLayout(new BoxLayout(centerContainer, BoxLayout.Y_AXIS));
+        centerContainer.setBackground(Color.BLACK);
+
+        // --- CAR PANEL ---
         carPanel = new CarPanel();
-        frame.getContentPane().add(carPanel, BorderLayout.CENTER);
+        carPanel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        centerContainer.add(carPanel);
 
-        JPanel bottom = new JPanel();
-        lblQuestion = new JLabel("Soal akan tampil di sini");
-        bottom.add(lblQuestion);
-        tfAnswer = new JTextField(5);
-        bottom.add(tfAnswer);
+        // ===== QUESTION PANEL (DI BAWAH PLAYER 2) =====
+        JPanel questionPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 12));
+        questionPanel.setBackground(new Color(20, 20, 20));
+        questionPanel.setMaximumSize(new Dimension(900, 70));
+
+        lblQuestion = new JLabel("Menunggu soal...");
+        lblQuestion.setForeground(Color.WHITE);
+        lblQuestion.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        questionPanel.add(lblQuestion);
+
+        tfAnswer = new JTextField(6);
+        tfAnswer.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        tfAnswer.setHorizontalAlignment(JTextField.CENTER);
+        questionPanel.add(tfAnswer);
+
         JButton btnSubmit = new JButton("Jawab");
-        bottom.add(btnSubmit);
-        frame.getContentPane().add(bottom, BorderLayout.SOUTH);
+        btnSubmit.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        btnSubmit.setBackground(new Color(70, 130, 255));
+        btnSubmit.setForeground(Color.WHITE);
+        questionPanel.add(btnSubmit);
 
+        centerContainer.add(questionPanel);
+
+        frame.add(centerContainer, BorderLayout.CENTER);
+
+        // ===== ACTIONS =====
         btnConnect.addActionListener(e -> {
             String ip = tfServerIP.getText().trim();
             int port = Integer.parseInt(tfPort.getText().trim());
@@ -71,11 +111,12 @@ public class ClientMain {
         });
 
         btnSubmit.addActionListener(e -> submitAnswer());
-
         tfAnswer.addActionListener(e -> submitAnswer());
 
+        frame.setLocationRelativeTo(null);
         frame.setVisible(true);
     }
+
 
     private void connectToServer(String ip, int port) {
         try {
