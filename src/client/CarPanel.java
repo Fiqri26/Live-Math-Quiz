@@ -32,6 +32,10 @@ public class CarPanel extends JPanel {
         this.names = newNames;
         repaint();
     }
+    public int getMyPosition(int playerId) {
+        return positions.getOrDefault(playerId, 0);
+    }
+    
 
     @Override
     protected void paintComponent(Graphics g) {

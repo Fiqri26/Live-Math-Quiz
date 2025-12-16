@@ -9,6 +9,7 @@ import java.util.concurrent.*;
 public class ServerMain {
     private static final int MIN_PLAYERS = 2;
     private static final int COUNTDOWN_SECONDS = 10;
+
     private static final int FINISH_LINE = 100;
     
     private ServerSocket serverSocket;
@@ -83,31 +84,32 @@ public class ServerMain {
 
     private void startCountdown() {
         System.out.println("Starting " + COUNTDOWN_SECONDS + " second countdown...");
-        
+    
         countdownTimer = new Timer();
-        final int[] countdown = {COUNTDOWN_SECONDS};
-        
+        final int[] countdown = { COUNTDOWN_SECONDS };
+    
         countdownTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 if (countdown[0] > 0) {
-                    System.out.println("Game starts in " + countdown[0] + " seconds... (Players: " + clients.size() + ")");
-                    
-                    // Broadcast countdown to all clients
+    
                     Message countdownMsg = new Message(Message.Type.COUNTDOWN)
-                        .put("seconds", countdown[0])
-                        .put("playerCount", clients.size());
+                            .put("seconds", countdown[0])
+                            .put("playerCount", clients.size());
+    
                     broadcast(countdownMsg);
-                    
+    
+                    System.out.println("Countdown: " + countdown[0]);
                     countdown[0]--;
+    
                 } else {
                     countdownTimer.cancel();
                     startGame();
                 }
             }
-        }, 0, 1000); // Run every second
+        }, 1000, 1000); 
     }
-
+    
     private void startGame() {
         gameStarted = true;
         System.out.println("Starting game with " + clients.size() + " players!");
@@ -232,8 +234,13 @@ public class ServerMain {
                 }).start();
             }
         } else {
-            System.out.println("Player " + playerId + " wrong answer: " + answer + " (correct: " + correctAnswer + ")");
+            System.out.println("Player " + playerId + " wrong answer: " + answer +
+                    " (correct: " + correctAnswer + ")");
+        
+            // TAMBAHAN WAJIB
+            broadcastPositions();
         }
+        
     }
 
     private void broadcastPositions() {

@@ -28,11 +28,18 @@ public class ClientMain {
     private int playerId;
     private String myOp;
     
-    // Music thread
-    private Thread musicThread;
+    // Music and Sound
     private Clip backgroundMusicClip;
     private volatile boolean musicPlaying = false;
+    private static final int COUNTDOWN_DURATION = 10;
+    private Clip countdownClip;
     
+    // Position tracking untuk detect correct/wrong answer
+    private int lastMyPosition = 0;
+    private volatile int currentQuestionId = -1; 
+    private volatile boolean waitingForResult = false; 
+    private volatile int lastSubmittedQId = -1; 
+
     // Colorful theme colors
     private final Color PRIMARY_ORANGE = new Color(255, 138, 0);
     private final Color PRIMARY_BLUE = new Color(102, 178, 255);
@@ -111,10 +118,9 @@ public class ClientMain {
     }
     
     private void startBackgroundMusic() {
-        musicThread = new Thread(() -> {
+        new Thread(() -> {
             try {
-                AudioInputStream audioStream =
-                    AudioSystem.getAudioInputStream(
+                AudioInputStream audioStream = AudioSystem.getAudioInputStream(
                         getClass().getResource("/client/music/mixkit-im-hungry-808.wav")
                     );
     
@@ -133,16 +139,14 @@ public class ClientMain {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-        });
-        musicThread.start();
+        }).start();
     }
     
     private void stopBackgroundMusic() {
         if (backgroundMusicClip != null && backgroundMusicClip.isRunning()) {
-            backgroundMusicClip.stop();
-            backgroundMusicClip.close();
+            backgroundMusicClip.stop(); 
             musicPlaying = false;
-            System.out.println("Background music stopped");
+            System.out.println("Background music paused");
         }
     }
     
@@ -162,39 +166,99 @@ public class ClientMain {
     
     private void playSoundEffect(String soundType) {
         new Thread(() -> {
+            Clip clip = null;
             try {
-                String path = null;
+                // Karakter ilegal telah dihapus di sini
+                String path = switch (soundType) {
+                    case "correct" -> "/client/music/mixkit-game-success-alert-2039.wav";
+                    case "wrong" -> "/client/music/mixkit-game-show-wrong-answer-buzz-950.wav";
+                    case "win" -> "/client/music/mixkit-cheering-crowd-loud-whistle-610.wav";
+                    default -> null;
+                };
     
-                switch (soundType) {
-                    case "correct":
-                        path = "/client/music/mixkit-game-success-alert-2039.wav";
-                        break;
-                    case "wrong":
-                        path = "/client/music/mixkit-game-error-alert-19.wav";
-                        break;
-                    case "win":
-                        path = "/client/music/mixkit-cheering-crowd-loud-whistle-610.wav";
-                        break;
-                    case "countdown":
-                        path = "/client/music/mixkit-start-countdown-927.wav";
-                        break;
+                if (path == null) {
+                    System.err.println("Sound type not found: " + soundType);
+                    return;
                 }
-    
-                if (path == null) return;
-    
-                AudioInputStream audioStream =
-                        AudioSystem.getAudioInputStream(
-                            getClass().getResource(path)
-                        );
-    
-                Clip clip = AudioSystem.getClip();
-                clip.open(audioStream);
-                clip.start();
+                
+                System.out.println("ATTEMPTING TO PLAY: " + soundType + " from " + path);
+                AudioInputStream sourceStream =
+                AudioSystem.getAudioInputStream(getClass().getResource(path));
+            
+            AudioFormat sourceFormat = sourceStream.getFormat();
+            
+            AudioFormat targetFormat = new AudioFormat(
+                    AudioFormat.Encoding.PCM_SIGNED,
+                    sourceFormat.getSampleRate(),
+                    16,                        // ⬅ FORCE 16 BIT
+                    sourceFormat.getChannels(),
+                    sourceFormat.getChannels() * 2,
+                    sourceFormat.getSampleRate(),
+                    false
+            );
+            
+            AudioInputStream convertedStream =
+                    AudioSystem.getAudioInputStream(targetFormat, sourceStream);
+            
+            clip = AudioSystem.getClip();
+            clip.open(convertedStream);
+            
+                
+                // Set volume
+                if (clip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+                    FloatControl volume = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
+                    volume.setValue(-5.0f);
+                }
+                
+                // Tambahkan Listener untuk menutup clip setelah selesai diputar
+                Clip finalClip = clip;
+                finalClip.addLineListener(event -> {
+                    if (event.getType() == LineEvent.Type.STOP) {
+                        finalClip.close();
+                        System.out.println("FINISHED and CLOSED: " + soundType);
+                    }
+                });
+                
+                System.out.println(" PLAYING NOW: " + soundType);
+                finalClip.start();
     
             } catch (Exception e) {
-                e.printStackTrace(); 
+                System.err.println(" ERROR playing sound '" + soundType + "': " + e.getMessage());
+                // Pastikan clip tertutup jika terjadi error
+                if (clip != null && clip.isOpen()) {
+                    clip.close();
+                }
+                e.printStackTrace();
             }
         }).start();
+    }
+
+    private void startCountdownSound() {
+        try {
+            if (countdownClip != null && countdownClip.isRunning()) {
+                return; 
+            }
+    
+            AudioInputStream audioStream = AudioSystem.getAudioInputStream(
+                        getClass().getResource("/client/music/timer_countdown-345137.wav")
+                    );
+    
+            countdownClip = AudioSystem.getClip();
+            countdownClip.open(audioStream);
+            countdownClip.start(); 
+    
+            System.out.println("Countdown sound started");
+    
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    
+    private void stopCountdownSound() {
+        if (countdownClip != null) {
+            countdownClip.stop();   // cukup stop
+            countdownClip = null;
+        }
     }
     
 
@@ -244,9 +308,13 @@ public class ClientMain {
         // Connect Button
         btnConnect = createColorfulButton("Connect", PRIMARY_GREEN);
         btnConnect.addActionListener(e -> {
-            String ip = tfServerIP.getText().trim();
-            int port = Integer.parseInt(tfPort.getText().trim());
-            connectToServer(ip, port);
+            try {
+                String ip = tfServerIP.getText().trim();
+                int port = Integer.parseInt(tfPort.getText().trim());
+                connectToServer(ip, port);
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(frame, "Invalid Port number!", "Error", JOptionPane.WARNING_MESSAGE);
+            }
         });
         connectionPanel.add(btnConnect);
 
@@ -336,19 +404,19 @@ public class ClientMain {
             PRIMARY_ORANGE, PRIMARY_BLUE, PRIMARY_GREEN,
             PRIMARY_YELLOW, PRIMARY_CYAN, PRIMARY_ORANGE,
             PRIMARY_BLUE, PRIMARY_GREEN, PRIMARY_YELLOW,
-            PRIMARY_CYAN, PRIMARY_ORANGE, new Color(255, 51, 51) // Red for backspace
+            PRIMARY_CYAN, PRIMARY_ORANGE, new Color(255, 51, 51)
         };
 
         ActionListener keyListener = e -> {
             String key = ((JButton) e.getSource()).getText();
 
             if (key.equals("DEL")) {
-                // Backspace - hapus karakter terakhir
                 String current = tfAnswer.getText();
                 if (!current.isEmpty()) {
                     tfAnswer.setText(current.substring(0, current.length() - 1));
                 }
             } else if (key.equals("+/-")) {
+                 // Tidak digunakan di keys array, tetapi jika ditambahkan di masa depan
                 if (!tfAnswer.getText().isEmpty()) {
                     if (tfAnswer.getText().startsWith("-")) {
                         tfAnswer.setText(tfAnswer.getText().substring(1));
@@ -371,7 +439,7 @@ public class ClientMain {
             "7", "8", "9",
             "4", "5", "6",
             "1", "2", "3",
-            "0", ".", "DEL"  // Tombol backspace ditambahkan
+            "0", ".", "DEL"
         };
 
         for (int i = 0; i < keys.length; i++) {
@@ -384,7 +452,6 @@ public class ClientMain {
             btn.setBorder(BorderFactory.createLineBorder(Color.WHITE, 2));
             btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
             
-            // Hover effect
             Color originalColor = buttonColors[i];
             btn.addMouseListener(new MouseAdapter() {
                 public void mouseEntered(MouseEvent e) {
@@ -434,7 +501,6 @@ public class ClientMain {
         ));
         btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
         
-        // Hover effect
         btn.addMouseListener(new MouseAdapter() {
             public void mouseEntered(MouseEvent e) {
                 btn.setBackground(bgColor.darker());
@@ -453,10 +519,10 @@ public class ClientMain {
             out = new ObjectOutputStream(s.getOutputStream());
             in = new ObjectInputStream(s.getInputStream());
 
-            // send CONNECT
             String name = tfName.getText().trim();
             if (name.isEmpty()) {
                 JOptionPane.showMessageDialog(frame, "Please enter your name!", "Error", JOptionPane.WARNING_MESSAGE);
+                s.close(); // Tutup socket jika tidak ada nama
                 return;
             }
             
@@ -465,7 +531,6 @@ public class ClientMain {
             out.writeObject(m);
             out.flush();
 
-            // listen thread
             new Thread(() -> {
                 try {
                     while (true) {
@@ -473,10 +538,15 @@ public class ClientMain {
                         handleIncoming(incoming);
                     }
                 } catch (Exception ex) {
+                    System.err.println("Connection read error: " + ex.getMessage());
                     SwingUtilities.invokeLater(() -> {
                         JOptionPane.showMessageDialog(frame, "Disconnected from server", "Connection Lost", JOptionPane.ERROR_MESSAGE);
                         btnConnect.setEnabled(true);
                         lblStatus.setText("Disconnected from server");
+                        // Bersihkan state koneksi
+                        try { if (s != null) s.close(); } catch (IOException ignored) {}
+                        stopBackgroundMusic();
+                        stopCountdownSound();
                     });
                 }
             }).start();
@@ -497,92 +567,162 @@ public class ClientMain {
                 playerId = (int) m.get("playerId");
                 System.out.println("Connected as player " + playerId);
                 break;
+                
             case COUNTDOWN:
                 int seconds = (int) m.get("seconds");
                 int playerCount = (int) m.get("playerCount");
+            
                 SwingUtilities.invokeLater(() -> {
                     lblQuestion.setText("Game starts in " + seconds + " seconds...");
                     lblStatus.setText("Waiting for players... (" + playerCount + " joined)");
-                    
-                    // Stop background music when countdown starts (player 2 joined)
-                    if (seconds == 10 && playerCount >= 2) {
+            
+                    if (seconds == COUNTDOWN_DURATION) {
                         stopBackgroundMusic();
+                        startCountdownSound();
                     }
-                    
-                    // Play countdown sound for last 3 seconds
-                    if (seconds <= 10                     && seconds > 0) {
-                        playSoundEffect("countdown");
+                    if (seconds <= 5 && seconds > 0) { // Berikan visual penekanan pada 5 detik terakhir
+                         lblQuestion.setForeground(Color.RED);
+                    } else {
+                         lblQuestion.setForeground(TEXT_BLACK);
                     }
                 });
                 break;
+                
             case START:
+                stopCountdownSound();
                 int totalPlayers = (int) m.get("playerCount");
                 SwingUtilities.invokeLater(() -> {
                     lblQuestion.setText("Game Started! Get Ready...");
+                    lblQuestion.setForeground(TEXT_BLACK); // Reset warna teks
                     lblStatus.setText("Game in progress... (" + totalPlayers + " players)");
                 });
                 break;
+
             case QUESTION:
                 int qId = (int) m.get("qId");
                 String text = (String) m.get("text");
                 SwingUtilities.invokeLater(() -> {
-                    lblQuestion.setText(text);  // Show only the question, no "Question #X:"
-                    tfAnswer.setName(String.valueOf(qId));
+                    lblQuestion.setText(text);
                     tfAnswer.setText("");
                     tfAnswer.requestFocus();
+                    currentQuestionId = qId;
+                    waitingForResult = false; 
+                    lastSubmittedQId = -1;
+                    System.out.println("New question #" + qId + ": " + text);
                 });
                 break;
+            
             case RESULT:
                 Map<Integer, Integer> posMap = (Map<Integer, Integer>) m.get("posMap");
                 Map<Integer, String> names = (Map<Integer, String>) m.get("names");
+            
                 SwingUtilities.invokeLater(() -> {
-                    // Always update with server data - this contains ALL players
+                    int newPos = posMap.getOrDefault(playerId, 0);
+                    
+                    System.out.println("RESULT received - Old pos: " + lastMyPosition + ", New pos: " + newPos + ", Waiting: " + waitingForResult + ", Last QID: " + lastSubmittedQId);
+                    
+                    if (lastSubmittedQId == currentQuestionId && lastSubmittedQId != -1) {
+                         if (newPos > lastMyPosition) {
+                            System.out.println("CORRECT! Playing correct sound");
+                            playSoundEffect("correct");
+                        } else {
+                            System.out.println("WRONG! Playing wrong sound");
+                            playSoundEffect("wrong");
+                        }
+                        lastSubmittedQId = -1; 
+                    }
+                    
+                    lastMyPosition = newPos;
                     carPanel.updateState(posMap, names);
-                    System.out.println("Updated positions: " + posMap);
-                    System.out.println("Updated names: " + names);
                 });
                 break;
+        
             case GAME_OVER:
-                int winner = (int) m.get("winnerId");
-                String winnerName = (String) m.get("winnerName");
+                String winnerName = (String) m.get("winnerName"); 
+            
                 SwingUtilities.invokeLater(() -> {
-                    playSoundEffect("win"); // Play victory sound
-                    JOptionPane.showMessageDialog(frame, 
-                        "Game Over!\n\nWinner: " + winnerName, 
-                        "Race Complete!", 
-                        JOptionPane.INFORMATION_MESSAGE);
-                    lblStatus.setText("Game finished! Winner: " + winnerName);
+                    lblStatus.setText(" Game finished! Winner: " + winnerName);
+                    lblQuestion.setText("Race Complete!");
+                    
+                    stopBackgroundMusic();
+                    stopCountdownSound();
+                    
+                    System.out.println("GAME OVER! Playing win sound");
+                    Timer winTimer = new Timer(500, e -> playSoundEffect("win"));
+                    winTimer.setRepeats(false); // ⬅ WAJIB
+                    winTimer.start();
+
+
+                    
+                    Timer dialogTimer = new Timer(2000, e -> {
+                        JOptionPane.showMessageDialog(frame,
+                                "Game Over! \n\nWinner: " + winnerName,
+                                "Race Complete!",
+                                JOptionPane.INFORMATION_MESSAGE);
+                        btnConnect.setEnabled(true);
+                        btnConnect.setText("Connect");
+                        // Mulai kembali musik background
+                        startBackgroundMusic(); 
+                    });
+                    dialogTimer.setRepeats(false);
+                    dialogTimer.start();
                 });
                 break;
+            
             case ERROR:
                 String msg = (String) m.get("msg");
                 SwingUtilities.invokeLater(() -> 
                     JOptionPane.showMessageDialog(frame, "Server error: " + msg, "Error", JOptionPane.ERROR_MESSAGE)
                 );
                 break;
-            default:
-                // ignore
         }
     }
 
     private void submitAnswer() {
+        // Hanya izinkan submit jika currentQuestionId valid dan belum submit untuk soal ini
+        if (currentQuestionId == -1 || lastSubmittedQId == currentQuestionId) {
+             if(currentQuestionId != -1) lblStatus.setText("Waiting for result of QID " + currentQuestionId + "...");
+             return;
+        }
+
         try {
             String answerText = tfAnswer.getText().trim();
             if (answerText.isEmpty()) return;
-            
-            int a = Integer.parseInt(answerText);
-            int qId = Integer.parseInt(tfAnswer.getName());
-            Message m = new Message(Message.Type.ANSWER).put("qId", qId).put("answer", a);
+    
+            int a = 0;
+            try {
+                 a = Integer.parseInt(answerText);
+            } catch (NumberFormatException nfe) {
+                 JOptionPane.showMessageDialog(frame,
+                        "Please enter a valid INTEGER number!",
+                        "Invalid Input",
+                        JOptionPane.WARNING_MESSAGE);
+                 return;
+            }
+    
+            Message m = new Message(Message.Type.ANSWER)
+                    .put("qId", currentQuestionId) 
+                    .put("answer", a);
+    
             out.writeObject(m);
             out.flush();
-            
+    
             tfAnswer.setText("");
-            lblStatus.setText("Answer submitted!");
+            lblStatus.setText("Answer submitted! Waiting for result...");
             
-        } catch (NumberFormatException ex) {
-            JOptionPane.showMessageDialog(frame, "Please enter a valid number!", "Invalid Input", JOptionPane.WARNING_MESSAGE);
+            waitingForResult = true;
+            lastSubmittedQId = currentQuestionId;
+            System.out.println("Answer submitted: " + a + " for question #" + currentQuestionId);
+    
         } catch (Exception ex) {
-            JOptionPane.showMessageDialog(frame, "Failed to submit answer: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+             System.err.println("Error on submit: " + ex.getMessage());
+             ex.printStackTrace();
+             SwingUtilities.invokeLater(() -> {
+                 JOptionPane.showMessageDialog(frame,
+                        "Connection error or invalid message format.",
+                        "Error",
+                        JOptionPane.ERROR_MESSAGE);
+             });
         }
     }
 }
