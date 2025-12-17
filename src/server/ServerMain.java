@@ -15,7 +15,6 @@ public class ServerMain {
     private List<ClientHandler> clients = new CopyOnWriteArrayList<>();
     public Map<Integer, Integer> playerPositions = new ConcurrentHashMap<>();
     public Map<Integer, String> playerNames = new ConcurrentHashMap<>();
-
     private Map<Integer, Integer> playerQuestionId = new ConcurrentHashMap<>();
     private Map<Integer, String> playerCorrectAnswer = new ConcurrentHashMap<>();
 
@@ -256,6 +255,8 @@ public class ServerMain {
         System.out.println("Player " + client.playerId + " disconnected");
         broadcastPositions();
     }
+    
+    
     
     private static class QuestionAnswer {
         String question;
