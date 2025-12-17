@@ -11,6 +11,12 @@ import java.io.ObjectOutputStream;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Comparator;
+
 import javax.sound.sampled.*;
 import java.io.File;
 import java.io.IOException;
@@ -18,15 +24,17 @@ import java.io.IOException;
 public class ClientMain {
     private JFrame frame;
     private JTextField tfName, tfServerIP, tfAnswer;
-    private JComboBox<String> cbOp;
     private JButton btnConnect;
     private CarPanel carPanel;
+    private PodiumPanel podiumPanel;
     private JLabel lblQuestion;
     private JLabel lblStatus;
     private ObjectOutputStream out;
     private ObjectInputStream in;
     private int playerId;
     private String myOp;
+    private JPanel leftPanel;
+    
     
     // Music and Sound
     private Clip backgroundMusicClip;
@@ -71,7 +79,7 @@ public class ClientMain {
         mainContent.setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
 
         // LEFT SIDE - Racing Panel
-        JPanel leftPanel = new JPanel();
+        leftPanel = new JPanel();
         leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
         leftPanel.setBackground(BG_WHITE);
 
@@ -93,6 +101,18 @@ public class ClientMain {
         carPanel.setPreferredSize(new Dimension(600, 400));
         carPanel.setMaximumSize(new Dimension(600, 400));
         leftPanel.add(carPanel);
+        
+        // Podium Panel (initially hidden)
+        podiumPanel = new PodiumPanel();
+        podiumPanel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        podiumPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(PRIMARY_ORANGE, 3),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
+        podiumPanel.setPreferredSize(new Dimension(600, 400));
+        podiumPanel.setMaximumSize(new Dimension(600, 400));
+        podiumPanel.setVisible(false);
+        leftPanel.add(podiumPanel);
 
         mainContent.add(leftPanel, BorderLayout.CENTER);
 
@@ -168,7 +188,6 @@ public class ClientMain {
         new Thread(() -> {
             Clip clip = null;
             try {
-                // Karakter ilegal telah dihapus di sini
                 String path = switch (soundType) {
                     case "correct" -> "/client/music/mixkit-game-success-alert-2039.wav";
                     case "wrong" -> "/client/music/mixkit-game-show-wrong-answer-buzz-950.wav";
@@ -190,7 +209,7 @@ public class ClientMain {
             AudioFormat targetFormat = new AudioFormat(
                     AudioFormat.Encoding.PCM_SIGNED,
                     sourceFormat.getSampleRate(),
-                    16,                        // ⬅ FORCE 16 BIT
+                    16,
                     sourceFormat.getChannels(),
                     sourceFormat.getChannels() * 2,
                     sourceFormat.getSampleRate(),
@@ -210,7 +229,6 @@ public class ClientMain {
                     volume.setValue(-5.0f);
                 }
                 
-                // Tambahkan Listener untuk menutup clip setelah selesai diputar
                 Clip finalClip = clip;
                 finalClip.addLineListener(event -> {
                     if (event.getType() == LineEvent.Type.STOP) {
@@ -224,7 +242,6 @@ public class ClientMain {
     
             } catch (Exception e) {
                 System.err.println(" ERROR playing sound '" + soundType + "': " + e.getMessage());
-                // Pastikan clip tertutup jika terjadi error
                 if (clip != null && clip.isOpen()) {
                     clip.close();
                 }
@@ -256,7 +273,7 @@ public class ClientMain {
     
     private void stopCountdownSound() {
         if (countdownClip != null) {
-            countdownClip.stop();   // cukup stop
+            countdownClip.stop();
             countdownClip = null;
         }
     }
@@ -294,16 +311,6 @@ public class ClientMain {
         connectionPanel.add(createLabel("Name:"));
         tfName = createTextField("", 10);
         connectionPanel.add(tfName);
-
-        // Operation
-        connectionPanel.add(createLabel("Operation:"));
-        cbOp = new JComboBox<>(new String[]{"+", "-", "*", "/"});
-        cbOp.setFont(new Font("Comic Sans MS", Font.BOLD, 14));
-        cbOp.setBackground(BG_WHITE);
-        cbOp.setForeground(TEXT_BLACK);
-        cbOp.setFocusable(false);
-        cbOp.setBorder(BorderFactory.createLineBorder(PRIMARY_BLUE, 2));
-        connectionPanel.add(cbOp);
 
         // Connect Button
         btnConnect = createColorfulButton("Connect", PRIMARY_GREEN);
@@ -416,7 +423,6 @@ public class ClientMain {
                     tfAnswer.setText(current.substring(0, current.length() - 1));
                 }
             } else if (key.equals("+/-")) {
-                 // Tidak digunakan di keys array, tetapi jika ditambahkan di masa depan
                 if (!tfAnswer.getText().isEmpty()) {
                     if (tfAnswer.getText().startsWith("-")) {
                         tfAnswer.setText(tfAnswer.getText().substring(1));
@@ -522,11 +528,11 @@ public class ClientMain {
             String name = tfName.getText().trim();
             if (name.isEmpty()) {
                 JOptionPane.showMessageDialog(frame, "Please enter your name!", "Error", JOptionPane.WARNING_MESSAGE);
-                s.close(); // Tutup socket jika tidak ada nama
+                s.close();
                 return;
             }
             
-            myOp = (String) cbOp.getSelectedItem();
+            myOp = "+";
             Message m = new Message(Message.Type.CONNECT).put("name", name).put("operation", myOp);
             out.writeObject(m);
             out.flush();
@@ -543,7 +549,6 @@ public class ClientMain {
                         JOptionPane.showMessageDialog(frame, "Disconnected from server", "Connection Lost", JOptionPane.ERROR_MESSAGE);
                         btnConnect.setEnabled(true);
                         lblStatus.setText("Disconnected from server");
-                        // Bersihkan state koneksi
                         try { if (s != null) s.close(); } catch (IOException ignored) {}
                         stopBackgroundMusic();
                         stopCountdownSound();
@@ -553,7 +558,7 @@ public class ClientMain {
 
             btnConnect.setEnabled(false);
             btnConnect.setText("Connected");
-            lblStatus.setText("Connected to server as " + name);
+            lblStatus.setText("Connected as " + name + " (Addition Mode)");
 
         } catch (Exception ex) {
             ex.printStackTrace();
@@ -580,7 +585,7 @@ public class ClientMain {
                         stopBackgroundMusic();
                         startCountdownSound();
                     }
-                    if (seconds <= 5 && seconds > 0) { // Berikan visual penekanan pada 5 detik terakhir
+                    if (seconds <= 5 && seconds > 0) {
                          lblQuestion.setForeground(Color.RED);
                     } else {
                          lblQuestion.setForeground(TEXT_BLACK);
@@ -593,8 +598,12 @@ public class ClientMain {
                 int totalPlayers = (int) m.get("playerCount");
                 SwingUtilities.invokeLater(() -> {
                     lblQuestion.setText("Game Started! Get Ready...");
-                    lblQuestion.setForeground(TEXT_BLACK); // Reset warna teks
+                    lblQuestion.setForeground(TEXT_BLACK);
                     lblStatus.setText("Game in progress... (" + totalPlayers + " players)");
+                    
+                    // Reset ke tampilan race
+                    carPanel.setVisible(true);
+                    podiumPanel.setVisible(false);
                 });
                 break;
 
@@ -638,7 +647,9 @@ public class ClientMain {
                 break;
         
             case GAME_OVER:
-                String winnerName = (String) m.get("winnerName"); 
+                String winnerName = (String) m.get("winnerName");
+                Map<Integer, Integer> finalPosMap = (Map<Integer, Integer>) m.get("posMap");
+                Map<Integer, String> finalNames = (Map<Integer, String>) m.get("names");
             
                 SwingUtilities.invokeLater(() -> {
                     lblStatus.setText(" Game finished! Winner: " + winnerName);
@@ -647,12 +658,15 @@ public class ClientMain {
                     stopBackgroundMusic();
                     stopCountdownSound();
                     
+                    // Switch ke tampilan podium
+                    carPanel.setVisible(false);
+                    podiumPanel.setVisible(true);
+                    podiumPanel.displayWinners(finalPosMap, finalNames);
+                    
                     System.out.println("GAME OVER! Playing win sound");
                     Timer winTimer = new Timer(500, e -> playSoundEffect("win"));
-                    winTimer.setRepeats(false); // ⬅ WAJIB
+                    winTimer.setRepeats(false);
                     winTimer.start();
-
-
                     
                     Timer dialogTimer = new Timer(2000, e -> {
                         JOptionPane.showMessageDialog(frame,
@@ -661,7 +675,6 @@ public class ClientMain {
                                 JOptionPane.INFORMATION_MESSAGE);
                         btnConnect.setEnabled(true);
                         btnConnect.setText("Connect");
-                        // Mulai kembali musik background
                         startBackgroundMusic(); 
                     });
                     dialogTimer.setRepeats(false);
@@ -679,7 +692,6 @@ public class ClientMain {
     }
 
     private void submitAnswer() {
-        // Hanya izinkan submit jika currentQuestionId valid dan belum submit untuk soal ini
         if (currentQuestionId == -1 || lastSubmittedQId == currentQuestionId) {
              if(currentQuestionId != -1) lblStatus.setText("Waiting for result of QID " + currentQuestionId + "...");
              return;
@@ -723,6 +735,304 @@ public class ClientMain {
                         "Error",
                         JOptionPane.ERROR_MESSAGE);
              });
+        }
+    }
+    
+    // Inner Class: PodiumPanel
+    class PodiumPanel extends JPanel {
+        private List<PlayerScore> topThree = new ArrayList<>();
+        
+        private final Color GOLD = new Color(255, 215, 0);
+        private final Color SILVER = new Color(192, 192, 192);
+        private final Color BRONZE = new Color(205, 127, 50);
+        private final Color GOLD_SHINE = new Color(255, 235, 100);
+        private final Color SILVER_SHINE = new Color(220, 220, 220);
+        private final Color BRONZE_SHINE = new Color(225, 160, 100);
+        
+        public PodiumPanel() {
+            setBackground(new Color(245, 245, 250));
+        }
+        
+        public void displayWinners(Map<Integer, Integer> posMap, Map<Integer, String> names) {
+            topThree.clear();
+            
+            for (Map.Entry<Integer, Integer> entry : posMap.entrySet()) {
+                int pid = entry.getKey();
+                int score = entry.getValue();
+                String name = names.getOrDefault(pid, "Player" + pid);
+                topThree.add(new PlayerScore(name, score));
+            }
+            
+            topThree.sort(Comparator.comparingInt(PlayerScore::getScore).reversed());
+            
+            if (topThree.size() > 3) {
+                topThree = topThree.subList(0, 3);
+            }
+            
+            repaint();
+        }
+        
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            
+            if (topThree.isEmpty()) {
+                g2.setFont(new Font("Comic Sans MS", Font.BOLD, 20));
+                g2.setColor(Color.BLACK);
+                String msg = "Waiting for results...";
+                FontMetrics fm = g2.getFontMetrics();
+                int x = (getWidth() - fm.stringWidth(msg)) / 2;
+                int y = getHeight() / 2;
+                g2.drawString(msg, x, y);
+                return;
+            }
+            
+            int panelWidth = getWidth();
+            int panelHeight = getHeight();
+            
+            // Draw confetti background
+            drawConfetti(g2, panelWidth, panelHeight);
+            
+            int podiumWidth = 140;
+            int maxPodiumHeight = 180;
+            int spacing = 50;
+            int baseY = panelHeight - 60;
+            
+            // Posisi podium: 1st di tengah, 2nd di kiri, 3rd di kanan
+            int[] positions = new int[3];
+            if (topThree.size() >= 1) positions[0] = panelWidth / 2 - podiumWidth / 2;
+            if (topThree.size() >= 2) positions[1] = positions[0] - podiumWidth - spacing;
+            if (topThree.size() >= 3) positions[2] = positions[0] + podiumWidth + spacing;
+            
+            // Tinggi podium
+            int[] heights = new int[3];
+            if (topThree.size() >= 1) heights[0] = maxPodiumHeight;
+            if (topThree.size() >= 2) heights[1] = (int)(maxPodiumHeight * 0.7);
+            if (topThree.size() >= 3) heights[2] = (int)(maxPodiumHeight * 0.55);
+            
+            Color[] colors = {GOLD, SILVER, BRONZE};
+            Color[] shineColors = {GOLD_SHINE, SILVER_SHINE, BRONZE_SHINE};
+            
+            // Urutan render: 2nd, 3rd, 1st
+            int[] renderOrder = {1, 2, 0};
+            
+            for (int idx : renderOrder) {
+                if (idx >= topThree.size()) continue;
+                
+                PlayerScore player = topThree.get(idx);
+                int x = positions[idx];
+                int h = heights[idx];
+                int y = baseY - h;
+                
+                // Shadow
+                g2.setColor(new Color(0, 0, 0, 30));
+                g2.fillRoundRect(x + 3, y + 3, podiumWidth, h, 15, 15);
+                
+                // Gradient podium
+                GradientPaint gradient = new GradientPaint(
+                    x, y, shineColors[idx], 
+                    x, y + h, colors[idx]
+                );
+                g2.setPaint(gradient);
+                g2.fillRoundRect(x, y, podiumWidth, h, 15, 15);
+                
+                // Border dengan efek 3D
+                g2.setColor(colors[idx].darker().darker());
+                g2.setStroke(new BasicStroke(4));
+                g2.drawRoundRect(x, y, podiumWidth, h, 15, 15);
+                
+                // Highlight top edge
+                g2.setColor(new Color(255, 255, 255, 150));
+                g2.setStroke(new BasicStroke(2));
+                g2.drawRoundRect(x + 2, y + 2, podiumWidth - 4, 20, 10, 10);
+                
+                // Medal emoji di atas podium
+                g2.setFont(new Font("Serif", Font.BOLD, 40));
+                
+                // Draw medal as colored circle with number
+                int medalSize = 50;
+                int medalCX = x + podiumWidth / 2;
+                int medalCY = y - 25;
+                
+                // Medal shadow
+                g2.setColor(new Color(0, 0, 0, 50));
+                g2.fillOval(medalCX - medalSize/2 + 2, medalCY - medalSize/2 + 2, medalSize, medalSize);
+                
+                // Medal circle
+                g2.setColor(colors[idx]);
+                g2.fillOval(medalCX - medalSize/2, medalCY - medalSize/2, medalSize, medalSize);
+                
+                // Medal border
+                g2.setColor(colors[idx].darker().darker());
+                g2.setStroke(new BasicStroke(3));
+                g2.drawOval(medalCX - medalSize/2, medalCY - medalSize/2, medalSize, medalSize);
+                
+                // Medal number
+                g2.setColor(Color.WHITE);
+                g2.setFont(new Font("Comic Sans MS", Font.BOLD, 28));
+                String medalNum = String.valueOf(idx + 1);
+                FontMetrics fmMedalNum = g2.getFontMetrics();
+                int medalNumX = medalCX - fmMedalNum.stringWidth(medalNum) / 2;
+                int medalNumY = medalCY + fmMedalNum.getAscent() / 2;
+                g2.drawString(medalNum, medalNumX, medalNumY);
+                
+                // Nama pemain di atas medal dengan background
+                String name = player.getName();
+                if (name.length() > 12) name = name.substring(0, 12);
+                
+                g2.setFont(new Font("Comic Sans MS", Font.BOLD, 16));
+                FontMetrics fmName = g2.getFontMetrics();
+                int nameWidth = fmName.stringWidth(name);
+                int nameX = x + (podiumWidth - nameWidth) / 2;
+                int nameY = y - 55;
+                
+                // Background untuk nama
+                g2.setColor(new Color(255, 255, 255, 220));
+                g2.fillRoundRect(nameX - 8, nameY - fmName.getAscent() - 2, 
+                                nameWidth + 16, fmName.getHeight() + 4, 10, 10);
+                
+                g2.setColor(colors[idx].darker());
+                g2.setStroke(new BasicStroke(2));
+                g2.drawRoundRect(nameX - 8, nameY - fmName.getAscent() - 2, 
+                                nameWidth + 16, fmName.getHeight() + 4, 10, 10);
+                
+                g2.setColor(Color.BLACK);
+                g2.drawString(name, nameX, nameY);
+                
+                // Rank di dalam podium
+                g2.setColor(Color.WHITE);
+                g2.setFont(new Font("Comic Sans MS", Font.BOLD, 22));
+                FontMetrics fmRank = g2.getFontMetrics();
+                
+                // Rank shadow
+                g2.setColor(new Color(0, 0, 0, 100));
+                g2.setColor(Color.WHITE);
+                
+                // Score dengan latar belakang
+                g2.setFont(new Font("Comic Sans MS", Font.BOLD, 32));
+                String scoreText = String.valueOf(player.getScore());
+                FontMetrics fmScore = g2.getFontMetrics();
+                int scoreWidth = fmScore.stringWidth(scoreText);
+                int scoreX = x + (podiumWidth - scoreWidth) / 2;
+                int scoreY = y + h / 2 + 15;
+                
+                // Score background circle
+                int circleSize = 70;
+                int circleX = x + (podiumWidth - circleSize) / 2;
+                int circleY = scoreY - 50;
+                
+                g2.setColor(new Color(255, 255, 255, 200));
+                g2.fillOval(circleX, circleY, circleSize, circleSize);
+                
+                g2.setColor(colors[idx].darker());
+                g2.setStroke(new BasicStroke(3));
+                g2.drawOval(circleX, circleY, circleSize, circleSize);
+                
+                // Score text
+                g2.setColor(colors[idx].darker().darker());
+                g2.drawString(scoreText, scoreX, scoreY);
+                
+                // Label "Points" di bawah score
+                g2.setFont(new Font("Comic Sans MS", Font.BOLD, 11));
+                g2.setColor(new Color(0, 0, 0, 180));
+                String pointsText = "points";
+                FontMetrics fmPoints = g2.getFontMetrics();
+                int pointsX = x + (podiumWidth - fmPoints.stringWidth(pointsText)) / 2;
+                g2.drawString(pointsText, pointsX, scoreY + 18);
+            }
+            
+            // Judul dengan efek
+            g2.setFont(new Font("Comic Sans MS", Font.BOLD, 36));
+            String title = "CHAMPIONS";
+            FontMetrics fmTitle = g2.getFontMetrics();
+            int titleX = (panelWidth - fmTitle.stringWidth(title)) / 2;
+            int titleY = 45;
+            
+            // Title shadow
+            g2.setColor(new Color(0, 0, 0, 50));
+            g2.drawString(title, titleX + 3, titleY + 3);
+            
+            // Title gradient
+            GradientPaint titleGradient = new GradientPaint(
+                titleX, titleY - 30, new Color(255, 140, 0),
+                titleX, titleY, new Color(255, 69, 0)
+            );
+            g2.setPaint(titleGradient);
+            g2.drawString(title, titleX, titleY);
+            
+            // Stars around title
+            g2.setColor(new Color(255, 215, 0));
+            g2.setFont(new Font("Serif", Font.BOLD, 24));
+            drawStar(g2, titleX - 35, titleY - 15, 12);
+            drawStar(g2, titleX + fmTitle.stringWidth(title) + 20, titleY - 15, 12);
+        }
+        
+        private void drawConfetti(Graphics2D g2, int width, int height) {
+            Color[] confettiColors = {
+                new Color(255, 100, 100, 150),
+                new Color(100, 255, 100, 150),
+                new Color(100, 100, 255, 150),
+                new Color(255, 255, 100, 150),
+                new Color(255, 100, 255, 150),
+                new Color(100, 255, 255, 150)
+            };
+            
+            for (int i = 0; i < 40; i++) {
+                int x = (int)(Math.random() * width);
+                int y = (int)(Math.random() * height);
+                int size = 8 + (int)(Math.random() * 8);
+                
+                g2.setColor(confettiColors[i % confettiColors.length]);
+                
+                if (i % 3 == 0) {
+                    g2.fillOval(x, y, size, size);
+                } else if (i % 3 == 1) {
+                    g2.fillRect(x, y, size, size);
+                } else {
+                    int[] xPoints = {x, x + size/2, x + size};
+                    int[] yPoints = {y + size, y, y + size};
+                    g2.fillPolygon(xPoints, yPoints, 3);
+                }
+            }
+        }
+        
+        private void drawStar(Graphics2D g2, int centerX, int centerY, int radius) {
+            int[] xPoints = new int[10];
+            int[] yPoints = new int[10];
+            
+            for (int i = 0; i < 10; i++) {
+                double angle = Math.PI / 2 + (2 * Math.PI * i / 10);
+                int r = (i % 2 == 0) ? radius : radius / 2;
+                xPoints[i] = centerX + (int)(r * Math.cos(angle));
+                yPoints[i] = centerY - (int)(r * Math.sin(angle));
+            }
+            
+            g2.fillPolygon(xPoints, yPoints, 10);
+            g2.setColor(new Color(255, 215, 0).darker());
+            g2.setStroke(new BasicStroke(2));
+            g2.drawPolygon(xPoints, yPoints, 10);
+        }
+    }
+    
+    // Inner Class: PlayerScore untuk menyimpan data pemain
+    class PlayerScore {
+        private String name;
+        private int score;
+        
+        public PlayerScore(String name, int score) {
+            this.name = name;
+            this.score = score;
+        }
+        
+        public String getName() {
+            return name;
+        }
+        
+        public int getScore() {
+            return score;
         }
     }
 }

@@ -9,17 +9,16 @@ import java.util.concurrent.*;
 public class ServerMain {
     private static final int MIN_PLAYERS = 2;
     private static final int COUNTDOWN_SECONDS = 10;
-
     private static final int FINISH_LINE = 100;
     
     private ServerSocket serverSocket;
     private List<ClientHandler> clients = new CopyOnWriteArrayList<>();
     public Map<Integer, Integer> playerPositions = new ConcurrentHashMap<>();
     public Map<Integer, String> playerNames = new ConcurrentHashMap<>();
-    private Map<Integer, String> playerOperations = new ConcurrentHashMap<>();
-    private Map<Integer, String> currentQuestions = new ConcurrentHashMap<>();
-    
-    private int currentQuestionId = 0;
+
+    private Map<Integer, Integer> playerQuestionId = new ConcurrentHashMap<>();
+    private Map<Integer, String> playerCorrectAnswer = new ConcurrentHashMap<>();
+
     private int nextPlayerId = 1;
     private boolean countdownStarted = false;
     private boolean gameStarted = false;
@@ -36,7 +35,7 @@ public class ServerMain {
             System.out.println("Server started on port 5000");
             System.out.println("Waiting for at least " + MIN_PLAYERS + " players...");
 
-            while (!gameOver) {
+            while (true) {
                 Socket clientSocket = serverSocket.accept();
                 System.out.println("New client connected: " + clientSocket.getInetAddress());
                 
@@ -59,13 +58,13 @@ public class ServerMain {
         }
     }
 
-    public synchronized int registerPlayer(String name, String operation) {
+    public synchronized int registerPlayer(String name) {
         int id = nextPlayerId++;
         playerPositions.put(id, 0);
         playerNames.put(id, name);
-        playerOperations.put(id, operation);
-        
-        System.out.println("Player " + id + " registered: " + name + " (Op: " + operation + ")");
+    
+        System.out.println("Player " + id + " registered: " + name + " (Addition Only)");
+    
         System.out.println("Total players: " + clients.size());
         System.out.println("Current positions: " + playerPositions);
         System.out.println("Current names: " + playerNames);
@@ -112,137 +111,105 @@ public class ServerMain {
     
     private void startGame() {
         gameStarted = true;
-        System.out.println("Starting game with " + clients.size() + " players!");
-        
-        Message startMsg = new Message(Message.Type.START)
-            .put("playerCount", clients.size());
-        broadcast(startMsg);
-        
-        // Broadcast initial positions
+    
+        broadcast(new Message(Message.Type.START)
+            .put("playerCount", clients.size()));
+    
         broadcastPositions();
-        
-        // Send first question immediately
+    
         new Thread(() -> {
             try {
-                Thread.sleep(2000); // Wait 2 seconds before first question
-                sendNextQuestion();
+                Thread.sleep(2000);
+                for (ClientHandler c : clients) {
+                    sendQuestionToPlayer(c.playerId);
+                }
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }).start();
     }
-
-    private void sendNextQuestion() {
-        currentQuestionId++;
-        
-        // Send different question to each player based on their operation
-        for (ClientHandler client : clients) {
-            String op = playerOperations.get(client.playerId);
-            QuestionAnswer qa = generateQuestion(op);
-            
-            // Store correct answer
-            currentQuestions.put(client.playerId, qa.answer);
-            
-            Message msg = new Message(Message.Type.QUESTION)
-                .put("qId", currentQuestionId)
-                .put("text", qa.question);
-            
-            client.send(msg);
-        }
-    }
-
-    private QuestionAnswer generateQuestion(String op) {
+    
+    private QuestionAnswer generateQuestion() {
         Random rand = new Random();
         int a = rand.nextInt(20) + 1;
         int b = rand.nextInt(20) + 1;
-        String question;
-        int answer;
-        
-        switch (op) {
-            case "+":
-                question = a + " + " + b;
-                answer = a + b;
-                break;
-            case "-":
-                int sum = a + b;
-                question = sum + " - " + b;
-                answer = a;
-                break;
-            case "*":
-                question = a + " × " + b;
-                answer = a * b;
-                break;
-            case "/":
-                int product = a * b;
-                question = product + " ÷ " + b;
-                answer = a;
-                break;
-            default:
-                question = a + " + " + b;
-                answer = a + b;
-        }
-        
-        return new QuestionAnswer(question, String.valueOf(answer));
+    
+        String question = a + " + " + b;
+        String answer = String.valueOf(a + b);
+    
+        return new QuestionAnswer(question, answer);
     }
+    
 
-    public synchronized void processAnswer(int playerId, int questionId, int answer) {
-        if (gameOver || questionId != currentQuestionId) {
-            return; // Ignore late or wrong question answers
+    private void sendQuestionToPlayer(int playerId) {
+        int qId = playerQuestionId.getOrDefault(playerId, 0) + 1;
+        playerQuestionId.put(playerId, qId);
+    
+        QuestionAnswer qa = generateQuestion();
+        playerCorrectAnswer.put(playerId, qa.answer);
+    
+        Message msg = new Message(Message.Type.QUESTION)
+            .put("qId", qId)
+            .put("text", qa.question);
+    
+        for (ClientHandler c : clients) {
+            if (c.playerId == playerId) {
+                c.send(msg);
+                break;
+            }
         }
-
-        String correctAnswer = currentQuestions.get(playerId);
-        if (correctAnswer == null) return;
-        
-        boolean correct = (String.valueOf(answer).equals(correctAnswer));
-
-        if (correct) {
-            int currentPos = playerPositions.get(playerId);
-            int newPos = Math.min(currentPos + 10, FINISH_LINE);
+    }
+    
+    
+    public synchronized void processAnswer(int playerId, int qId, int answer) {
+        if (gameOver) return;
+    
+        int expectedQId = playerQuestionId.getOrDefault(playerId, -1);
+        if (qId != expectedQId) return;
+    
+        String correct = playerCorrectAnswer.get(playerId);
+        boolean isCorrect = String.valueOf(answer).equals(correct);
+    
+        if (isCorrect) {
+            int newPos = Math.min(playerPositions.get(playerId) + 10, FINISH_LINE);
             playerPositions.put(playerId, newPos);
-
-            System.out.println("Player " + playerId + " (" + playerNames.get(playerId) + ") correct! Position: " + newPos);
-
-            // Broadcast updated positions
+    
             broadcastPositions();
-
-            // Check for winner
-            if (newPos >= FINISH_LINE && !gameOver) {
+            if (newPos >= FINISH_LINE) {
                 gameOver = true;
+            
+                // Kirim GAME_OVER dengan data lengkap untuk podium
                 Message winMsg = new Message(Message.Type.GAME_OVER)
                     .put("winnerId", playerId)
-                    .put("winnerName", playerNames.get(playerId));
+                    .put("winnerName", playerNames.get(playerId))
+                    .put("posMap", new HashMap<>(playerPositions))
+                    .put("names", new HashMap<>(playerNames));
+            
                 broadcast(winMsg);
-                System.out.println("Player " + playerId + " (" + playerNames.get(playerId) + ") wins!");
-                
-                // Close server after game over
+            
+                System.out.println("WINNER: " + playerNames.get(playerId));
+                System.out.println("Final Positions: " + playerPositions);
+            
+                // Reset server setelah game over
                 new Timer().schedule(new TimerTask() {
                     @Override
                     public void run() {
-                        System.out.println("Game ended. Shutting down server...");
-                        System.exit(0);
+                        resetGame();
                     }
-                }, 5000);
-            } else {
-                // Send next question after correct answer
-                new Thread(() -> {
-                    try {
-                        Thread.sleep(1000); // Wait 1 second before next question
-                        sendNextQuestion();
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }).start();
+                }, 5000); // delay 5 detik (biar client lihat podium)
+            
+                return;
             }
+            
         } else {
-            System.out.println("Player " + playerId + " wrong answer: " + answer +
-                    " (correct: " + correctAnswer + ")");
-        
-            // TAMBAHAN WAJIB
             broadcastPositions();
         }
-        
+    
+        if (!gameOver) {
+            sendQuestionToPlayer(playerId);
+        }
     }
-
+    
     private void broadcastPositions() {
         Message msg = new Message(Message.Type.RESULT)
             .put("posMap", new HashMap<>(playerPositions))
@@ -261,29 +228,33 @@ public class ServerMain {
         }
     }
 
+    private synchronized void resetGame() {
+        System.out.println("Resetting game...");
+    
+        gameOver = false;
+        gameStarted = false;
+        countdownStarted = false;
+    
+        nextPlayerId = 1;
+    
+        playerPositions.clear();
+        playerNames.clear();
+        playerQuestionId.clear();
+        playerCorrectAnswer.clear();
+    
+        System.out.println("Server reset complete. Ready for new game.");
+    }
+    
+    
+
     public void removeClient(ClientHandler client) {
         clients.remove(client);
-        
-        // If player disconnects during countdown, check if we still have enough players
-        if (countdownStarted && !gameStarted) {
-            if (clients.size() < MIN_PLAYERS) {
-                System.out.println("Not enough players. Cancelling countdown...");
-                if (countdownTimer != null) {
-                    countdownTimer.cancel();
-                }
-                countdownStarted = false;
-                
-                // Notify remaining clients
-                Message msg = new Message(Message.Type.ERROR)
-                    .put("msg", "Countdown cancelled - not enough players");
-                broadcast(msg);
-            }
-        }
-        
         playerPositions.remove(client.playerId);
         playerNames.remove(client.playerId);
-        playerOperations.remove(client.playerId);
+        playerQuestionId.remove(client.playerId);
+        playerCorrectAnswer.remove(client.playerId);
         System.out.println("Player " + client.playerId + " disconnected");
+        broadcastPositions();
     }
     
     private static class QuestionAnswer {
@@ -318,17 +289,9 @@ class ClientHandler implements Runnable {
             Message firstMsg = (Message) in.readObject();
             if (firstMsg.type == Message.Type.CONNECT) {
                 String name = (String) firstMsg.get("name");
-                String operation = (String) firstMsg.get("operation");
-                
-                playerId = server.registerPlayer(name, operation);
-
+                playerId = server.registerPlayer(name);
                 Message ack = new Message(Message.Type.CONNECT_ACK).put("playerId", playerId);
                 send(ack);
-                
-                // Note: broadcastPositions() is called in registerPlayer(), 
-                // so all clients will receive updated positions automatically
-
-                // Listen for answers
                 while (true) {
                     Message msg = (Message) in.readObject();
                     if (msg.type == Message.Type.ANSWER) {
